@@ -42,14 +42,40 @@ func main() {
 	fmt.Printf("JFIF APP0 Marker %+v\n", app0Marker)
 
 	// Continue from SOI length + APPO marker itself + length of JFIF APP0 marker segment
-	idx := 2 + 2 + app0Marker.length
+	idx := 2 + 2 + int(app0Marker.length)
 
-	for i := idx; i < 100; i++ {
-		fmt.Printf("%x ", dat[i])
+	// Next comes:
+	// 2 quantization tables (ff db)
+	// 1 start of frame (ff c2)
+	// 2 huffman tables (ff c4)
+
+	qTable1, err := parseQtzTable(&dat, idx)
+
+	// Pain point: If I try to use qTable1 before checking the error,
+	// the compiler doesn't tell me that I shouldn't do that
+	if err != nil {
+		panic(err)
+	}
+
+	idx += int(qTable1.length) + 2
+
+	fmt.Printf("Table 1: %+v\n", qTable1)
+
+	qTable2, err := parseQtzTable(&dat, idx)
+
+	if err != nil {
+		panic(err)
+	}
+
+	idx += int(qTable2.length) + 2
+
+	fmt.Printf("Table 2: %+v\n", qTable2)
+
+	fmt.Print("cont: ")
+	for i := 0; i < 100; i++ {
+		fmt.Printf("%x ", dat[idx+i])
 	}
 	fmt.Print("\n")
-
-	// Next comes a quantization table (marked by ff db). What's this? How to parse?
 }
 
 type JFIFDensity byte
@@ -68,6 +94,13 @@ type APP0Marker struct {
 	yDensity     uint16
 	xThumbnail   uint8
 	yThumbnail   uint8
+}
+
+type QuantizationTable struct {
+	length      uint16
+	precision   uint8
+	destination uint8
+	data        [8][8]int
 }
 
 // Apparently, in Go function values and returns are copies by default.
@@ -145,4 +178,40 @@ func parseAPP0Marker(data *[]byte, idx int) (*APP0Marker, error) {
 
 	// TODO(maybe never): get data from embedded thumbnail
 	return &marker, nil
+}
+
+func parseQtzTable(data *[]byte, idx int) (*QuantizationTable, error) {
+	table := QuantizationTable{}
+
+	// Check that the first and second bytes are the quantization table markers "ff cb"
+	firstByte := (*data)[idx]
+	secondByte := (*data)[idx+1]
+	if firstByte != 0xff || secondByte != 0xdb {
+		return nil, errors.New("JPEG image has invalid QT marker")
+	}
+	idx += 2
+
+	// Next 2 bytes indicate the length of the marker
+	table.length = binary.BigEndian.Uint16((*data)[idx : idx+2])
+	idx += 2
+
+	// Next byte has the precision and destination id of the quant table
+	precisionAndIdByte := (*data)[idx]
+
+	// First 4 bits are precision
+	table.precision = (precisionAndIdByte >> 4) & 0x0f
+
+	// Last 4 bits are destination
+	table.destination = precisionAndIdByte & 0x0f
+
+	idx++
+
+	// Now comes the data (minus 3 for length and precision bytes)
+	for i := 0; i < int(table.length-3); i++ {
+		row := int(i / 8)
+		col := i - (row)*8
+		table.data[row][col] = int((*data)[idx+i])
+	}
+
+	return &table, nil
 }
