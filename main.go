@@ -39,8 +39,6 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("JFIF APP0 Marker %+v\n", app0Marker)
-
 	// Continue from SOI length + APPO marker itself + length of JFIF APP0 marker segment
 	idx := 2 + 2 + int(app0Marker.length)
 
@@ -59,8 +57,6 @@ func main() {
 
 	idx += int(qTable1.length) + 2
 
-	fmt.Printf("Table 1: %+v\n", qTable1)
-
 	qTable2, err := parseQtzTable(&dat, idx)
 
 	if err != nil {
@@ -69,7 +65,7 @@ func main() {
 
 	idx += int(qTable2.length) + 2
 
-	fmt.Printf("Table 2: %+v\n", qTable2)
+	parseStartingFrame(&dat, idx)
 
 	fmt.Print("cont: ")
 	for i := 0; i < 100; i++ {
@@ -101,6 +97,15 @@ type QuantizationTable struct {
 	precision   uint8
 	destination uint8
 	data        [8][8]int
+}
+
+type StartingFrame struct {
+	length          uint16
+	samplePrecision byte
+	width           int
+	height          int
+	numComponents   int
+	componentSpecs  [][3]byte
 }
 
 // Apparently, in Go function values and returns are copies by default.
@@ -214,4 +219,20 @@ func parseQtzTable(data *[]byte, idx int) (*QuantizationTable, error) {
 	}
 
 	return &table, nil
+}
+
+func parseStartingFrame(data *[]byte, idx int) (*StartingFrame, error) {
+	frame := StartingFrame{}
+
+	// Check that first two bytes represent a SOF marker
+	firstFrame := (*data)[idx]
+	secondFrame := (*data)[idx+1]
+
+	if firstFrame != 0xff || secondFrame != 0xc2 {
+		return nil, errors.New("invalid SOF marker")
+	}
+
+	idx += 2
+
+	return &frame, nil
 }
