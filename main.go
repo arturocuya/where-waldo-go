@@ -65,7 +65,15 @@ func main() {
 
 	idx += int(qTable2.length) + 2
 
-	parseStartingFrame(&dat, idx)
+	startFrame, err := parseStartingFrame(&dat, idx)
+
+	if err != nil {
+		panic(err)
+	}
+
+	idx += int(startFrame.length) + 2
+
+	fmt.Printf("start frame %+v\n", startFrame)
 
 	fmt.Print("cont: ")
 	for i := 0; i < 100; i++ {
@@ -102,10 +110,16 @@ type QuantizationTable struct {
 type StartingFrame struct {
 	length          uint16
 	samplePrecision byte
-	width           int
-	height          int
+	width           uint16
+	height          uint16
 	numComponents   int
-	componentSpecs  [][3]byte
+	componentSpecs  []ComponentSpec
+}
+
+type ComponentSpec struct {
+	componentType   byte
+	samplingFactors byte
+	qTable          byte
 }
 
 // Apparently, in Go function values and returns are copies by default.
@@ -233,6 +247,30 @@ func parseStartingFrame(data *[]byte, idx int) (*StartingFrame, error) {
 	}
 
 	idx += 2
+
+	frame.length = binary.BigEndian.Uint16((*data)[idx : idx+2])
+	idx += 2
+
+	frame.samplePrecision = (*data)[idx]
+	idx++
+
+	frame.height = binary.BigEndian.Uint16((*data)[idx : idx+2])
+	idx += 2
+
+	frame.width = binary.BigEndian.Uint16((*data)[idx : idx+2])
+	idx += 2
+
+	frame.numComponents = int((*data)[idx])
+	idx++
+
+	for i := 0; i < frame.numComponents; i++ {
+		frame.componentSpecs = append(frame.componentSpecs, ComponentSpec{
+			componentType:   (*data)[idx],
+			samplingFactors: (*data)[idx+1],
+			qTable:          (*data)[idx+2],
+		})
+		idx += 3
+	}
 
 	return &frame, nil
 }
