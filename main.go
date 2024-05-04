@@ -21,7 +21,7 @@ func main() {
 	// We'll take this as reference for the image syntax https://en.wikipedia.org/wiki/JPEG#Syntax_and_structure
 
 	// JPEG image must start with SOI bytes 0xFF, 0xD8
-	if fmt.Sprintf("%x", dat[0]) != "ff" || fmt.Sprintf("%x", dat[1]) != "d8" {
+	if dat[0] != 0xff || dat[1] != 0xd8 {
 		panic("JPEG Image has invalid SOI")
 	} else {
 		fmt.Println("Valid JPEG SOI")
@@ -73,10 +73,28 @@ func main() {
 
 	idx += int(startFrame.length) + 2
 
-	fmt.Printf("start frame %+v\n", startFrame)
+	huffman, err := parseHuffmanTable(&dat, idx)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Huffman: %+v\n", huffman)
+
+	idx += int(huffman.length) + 2
+
+	huffman2, err := parseHuffmanTable(&dat, idx)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Huffman: %+v\n", huffman2)
+
+	idx += int(huffman2.length) + 2
 
 	fmt.Print("cont: ")
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		fmt.Printf("%x ", dat[idx+i])
 	}
 	fmt.Print("\n")
@@ -120,6 +138,14 @@ type ComponentSpec struct {
 	componentType   byte
 	samplingFactors byte
 	qTable          byte
+}
+
+type HuffmanTable struct {
+	length        uint16
+	tableClass    uint8
+	destination   uint8
+	numberOfCodes [16]uint16
+	values        []uint16
 }
 
 // Apparently, in Go function values and returns are copies by default.
@@ -273,4 +299,45 @@ func parseStartingFrame(data *[]byte, idx int) (*StartingFrame, error) {
 	}
 
 	return &frame, nil
+}
+
+func parseHuffmanTable(data *[]byte, idx int) (*HuffmanTable, error) {
+	// ff c4 | 0 1c | 0 | 0 2 3 1 1 1 1 0 0 0 0 0 0 0 0 0 | 5 6 3 4 7 2 1 0 8
+
+	firstByte := (*data)[idx]
+	secondByte := (*data)[idx+1]
+
+	if firstByte != 0xff || secondByte != 0xc4 {
+		return nil, errors.New("invalid huffman marker")
+	}
+
+	idx += 2
+
+	table := HuffmanTable{}
+
+	table.length = binary.BigEndian.Uint16((*data)[idx : idx+2])
+	idx += 2
+
+	classAndDestination := (*data)[idx]
+
+	table.tableClass = (classAndDestination >> 4) & 0x0f
+	table.destination = classAndDestination & 0x0f
+
+	idx++
+
+	nonEmptyLengths := 0
+	for i := 0; i < 16; i++ {
+		numberOfCodes := uint16((*data)[idx+i])
+		if numberOfCodes != 0 {
+			nonEmptyLengths++
+		}
+		table.numberOfCodes[i] = numberOfCodes
+	}
+	idx += 16
+
+	for i := 0; i < nonEmptyLengths; i++ {
+		table.values = append(table.values, uint16((*data)[idx+i]))
+	}
+
+	return &table, nil
 }
